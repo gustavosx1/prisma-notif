@@ -35,15 +35,15 @@ const MOTIVATIONAL_QUOTES = [
   "Continue: a próxima tentativa pode mudar tudo.",
 ];
 const TITLE_SUGGESTIONS = [
-  "Saiba mais!",
+  "🔎 Saiba mais",
   "Veja todas as perspectivas",
-  "Entenda o que está acontecendo",
+  "📰 Entenda o que está acontecendo",
   "Confira os principais detalhes",
-  "Veja o que muda agora",
+  "📌 Veja o que muda agora",
   "Acompanhe essa história",
-  "O que você precisa saber",
+  "💡 O que você precisa saber",
   "Leia a análise completa",
-  "Descubra os próximos passos",
+  "🧭 Descubra os próximos passos",
   "Veja os pontos essenciais",
 ];
 
