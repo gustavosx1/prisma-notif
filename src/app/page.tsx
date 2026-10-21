@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import Image from "next/image";
 import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 type Topic = { id: string; title: string; summary: string; publishedAt: string | null; articleCount: number };
+type ImageEntityType = "public_figure" | "institution" | "topic";
+type ImageAsset = { id: string; displayName: string; imageUrl: string; entityKey: string; attribution: string | null; licenseName: string };
 type DispatchStatus = { id: string; state: string; accepted: number | null; rejected: number | null; receipts: string | null; error: string | null };
 type DispatchRequest = { topicId: string; title: string; body: string; idempotencyKey: string };
 type AdminAccess = "checking" | "allowed" | "denied" | "error";
@@ -12,6 +15,11 @@ const PAGE_SIZE = 25;
 const TITLE_LIMIT = Number(process.env.NEXT_PUBLIC_NOTIFICATION_TITLE_LIMIT ?? 120);
 const BODY_LIMIT = Number(process.env.NEXT_PUBLIC_NOTIFICATION_BODY_LIMIT ?? 240);
 const TERMINAL_STATES = new Set(["sent", "failed"]);
+const IMAGE_CATEGORIES: { id: ImageEntityType; label: string }[] = [
+  { id: "public_figure", label: "Figuras públicas" },
+  { id: "institution", label: "Instituições" },
+  { id: "topic", label: "Temas" },
+];
 const TITLE_SUGGESTIONS = [
   "Saiba mais!",
   "Veja todas as perspectivas",
@@ -37,6 +45,20 @@ function readTopicPage(payload: Record<string, unknown>, requestedPage: number) 
   const total = Number(meta.total ?? meta.total_items ?? payload.total ?? topics.length);
   const pageSize = Number(meta.page_size ?? meta.per_page ?? payload.page_size ?? PAGE_SIZE);
   return { topics, page: Number(meta.page ?? payload.page ?? requestedPage), totalPages: Number(meta.total_pages ?? meta.pages ?? payload.total_pages ?? Math.max(1, Math.ceil(total / pageSize))), total };
+}
+function readImageAssets(payload: Record<string, unknown>): ImageAsset[] {
+  const rows = [payload.assets, payload.images, payload.items, payload.data].find(Array.isArray) as unknown[] | undefined;
+  return (rows ?? []).map((raw) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      id: String(row.id ?? row.entity_key ?? row.image_url ?? ""),
+      displayName: String(row.display_name ?? row.entity_key ?? "Imagem sem nome"),
+      imageUrl: String(row.image_url ?? ""),
+      entityKey: String(row.entity_key ?? ""),
+      attribution: row.attribution ? String(row.attribution) : null,
+      licenseName: String(row.license_name ?? "Licença não informada"),
+    };
+  }).filter((asset) => asset.imageUrl);
 }
 function readDispatchStatus(payload: Record<string, unknown>): DispatchStatus {
   const receipts = payload.receipts_status ?? payload.receipt_status ?? payload.receipts;
@@ -92,6 +114,10 @@ export default function Home() {
   const [adminCheckAttempt, setAdminCheckAttempt] = useState(0);
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [authError, setAuthError] = useState(""); const [authBusy, setAuthBusy] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]); const [page, setPage] = useState(1); const [totalPages, setTotalPages] = useState(1); const [totalTopics, setTotalTopics] = useState(0);
+  const [activeSection, setActiveSection] = useState<"notifications" | "images">("notifications");
+  const [imageCategory, setImageCategory] = useState<ImageEntityType>("public_figure");
+  const [imageRefresh, setImageRefresh] = useState(0);
+  const [imageAssets, setImageAssets] = useState<ImageAsset[]>([]); const [loadingImages, setLoadingImages] = useState(false); const [imagesError, setImagesError] = useState(""); const [copiedImageId, setCopiedImageId] = useState<string | null>(null);
   const [query, setQuery] = useState(""); const [activeQuery, setActiveQuery] = useState(""); const [loadingTopics, setLoadingTopics] = useState(false); const [topicsError, setTopicsError] = useState("");
   const [selected, setSelected] = useState<Topic | null>(null); const [editedTitle, setEditedTitle] = useState(""); const [editedBody, setEditedBody] = useState("");
   const [dispatchRequest, setDispatchRequest] = useState<DispatchRequest | null>(null); const [dispatchBusy, setDispatchBusy] = useState(false); const [dispatchStatus, setDispatchStatus] = useState<DispatchStatus | null>(null); const [dispatchError, setDispatchError] = useState(""); const [checkingStatus, setCheckingStatus] = useState(false);
@@ -159,6 +185,26 @@ export default function Home() {
   }, [session, adminAccess, page, activeQuery, fetchTopics]);
 
   useEffect(() => {
+    if (!session || adminAccess !== "allowed" || activeSection !== "images") return;
+    let active = true;
+    const loadImages = async () => {
+      setLoadingImages(true); setImagesError(""); setImageAssets([]);
+      try {
+        const params = new URLSearchParams({ entity_type: imageCategory });
+        const response = await apiFetch(`/notifications/admin/images?${params}`, session);
+        const payload = await response.json() as Record<string, unknown>;
+        if (active) setImageAssets(readImageAssets(payload));
+      } catch (error) {
+        if (active) setImagesError(error instanceof Error ? error.message : "Não foi possível carregar as imagens.");
+      } finally {
+        if (active) setLoadingImages(false);
+      }
+    };
+    void loadImages();
+    return () => { active = false; };
+  }, [session, adminAccess, activeSection, imageCategory, imageRefresh]);
+
+  useEffect(() => {
     if (!session || adminAccess !== "allowed" || !dispatchStatus?.id || TERMINAL_STATES.has(dispatchStatus.state)) return;
     let cancelled = false; const controller = new AbortController(); statusAbort.current = controller;
     const poll = async () => {
@@ -199,6 +245,15 @@ export default function Home() {
     if (!selectedTopic || dispatchBusy || !editedTitle.trim() || !editedBody.trim()) return;
     void submitDispatch({ topicId: selectedTopic.id, title: editedTitle.trim(), body: editedBody.trim(), idempotencyKey: crypto.randomUUID() });
   }
+  async function copyImageUrl(asset: ImageAsset) {
+    try {
+      await navigator.clipboard.writeText(asset.imageUrl);
+      setCopiedImageId(asset.id);
+      window.setTimeout(() => setCopiedImageId((current) => current === asset.id ? null : current), 1800);
+    } catch {
+      setImagesError("Não foi possível copiar o link. Verifique as permissões da área de transferência do navegador.");
+    }
+  }
 
   if (!authReady) return <main className="boot-screen" aria-label="Carregando painel"><span className="loader" /><span>Preparando seu espaço seguro…</span></main>;
   if (!session) return (
@@ -217,14 +272,14 @@ export default function Home() {
 
   return (
     <main className="dashboard-shell">
-      <aside className="sidebar"><Brand /><div className="sidebar-label">WORKSPACE</div><a className="nav-active" href="#topics"><span className="nav-icon"><Icon name="bell" /></span>Notificações</a><div className="sidebar-bottom"><div className="sidebar-tip"><span className="tip-star">✳</span><p>Uma seleção cuidadosa faz toda a diferença.</p></div><div className="profile"><div className="avatar">{(session.user.email?.[0] ?? "P").toUpperCase()}</div><div className="profile-data"><strong>{session.user.email}</strong><span>Administrador</span></div><button className="icon-button logout-button" title="Sair" aria-label="Sair" onClick={handleLogout}><Icon name="logout" /></button></div></div></aside>
-      <section className="main-content" id="topics"><header className="topbar"><div className="breadcrumb">Prisma News <span>/</span> <strong>Notificações</strong></div><button className="mobile-logout" onClick={handleLogout}><Icon name="logout" /> Sair</button><div className="topbar-tag"><span className="live-dot" /> AMBIENTE SEGURO</div></header>
-        <div className="page-content"><div className="page-heading"><div><p className="eyebrow muted">DISTRIBUIÇÃO EDITORIAL</p><h1>Notificações <span className="heading-spark">✳</span></h1><p className="page-intro">Escolha uma pauta publicada e leve-a até os leitores.</p></div><div className="published-count"><span className="count-icon"><Icon name="spark" /></span><div><strong>{totalTopics}</strong><span>pautas disponíveis</span></div></div></div>
+      <aside className="sidebar"><Brand /><div className="sidebar-label">WORKSPACE</div><button className={`workspace-nav ${activeSection === "notifications" ? "nav-active" : ""}`} onClick={() => setActiveSection("notifications")}><span className="nav-icon"><Icon name="bell" /></span>Notificações</button><button className={`workspace-nav ${activeSection === "images" ? "nav-active" : ""}`} onClick={() => setActiveSection("images")}><span className="nav-icon">▧</span>Imagens</button><div className="sidebar-bottom"><div className="sidebar-tip"><span className="tip-star">✳</span><p>Uma seleção cuidadosa faz toda a diferença.</p></div><div className="profile"><div className="avatar">{(session.user.email?.[0] ?? "P").toUpperCase()}</div><div className="profile-data"><strong>{session.user.email}</strong><span>Administrador</span></div><button className="icon-button logout-button" title="Sair" aria-label="Sair" onClick={handleLogout}><Icon name="logout" /></button></div></div></aside>
+      <section className="main-content" id="topics"><header className="topbar"><div className="breadcrumb">Prisma News <span>/</span> <strong>{activeSection === "images" ? "Imagens" : "Notificações"}</strong></div><div className="mobile-sections"><button className={activeSection === "notifications" ? "mobile-section-active" : ""} onClick={() => setActiveSection("notifications")}>Notificações</button><button className={activeSection === "images" ? "mobile-section-active" : ""} onClick={() => setActiveSection("images")}>Imagens</button></div><button className="mobile-logout" onClick={handleLogout}><Icon name="logout" /> Sair</button><div className="topbar-tag"><span className="live-dot" /> AMBIENTE SEGURO</div></header>
+        <div className="page-content">{activeSection === "images" ? <section className="images-page"><div className="page-heading"><div><p className="eyebrow muted">BIBLIOTECA EDITORIAL</p><h1>Imagens</h1><p className="page-intro">Catálogo curado de imagens com origem e direitos revisados.</p></div><div className="published-count"><span className="count-icon">▧</span><div><strong>{imageAssets.length}</strong><span>nesta categoria</span></div></div></div><div className="image-category-tabs" role="tablist" aria-label="Categorias de imagens">{IMAGE_CATEGORIES.map((category) => <button key={category.id} type="button" role="tab" aria-selected={imageCategory === category.id} className={imageCategory === category.id ? "image-category-active" : ""} onClick={() => setImageCategory(category.id)}>{category.label}</button>)}</div>{imagesError && <div className="error-banner" role="alert"><span>{imagesError}</span><button className="text-button" onClick={() => setImageRefresh((value) => value + 1)}>Tentar novamente</button></div>}{loadingImages ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Carregando catálogo…</span></div> : imagesError ? null : imageAssets.length === 0 ? <div className="empty-state"><span className="empty-icon">▧</span><h3>Nenhuma imagem nesta categoria</h3><p>Imagens ativas do catálogo aparecerão aqui.</p></div> : <div className="image-grid">{imageAssets.map((asset) => <article className="image-asset-card" key={asset.id}><div className="image-preview"><Image src={asset.imageUrl} alt={asset.displayName} fill unoptimized sizes="(max-width: 700px) 100vw, (max-width: 1100px) 50vw, 33vw" referrerPolicy="no-referrer" /></div><div className="image-asset-info"><h2>{asset.displayName}</h2><p>{asset.attribution || asset.licenseName}</p><button className="button button-secondary copy-image-button" onClick={() => void copyImageUrl(asset)}>{copiedImageId === asset.id ? "Link copiado" : "Copiar link da imagem"}</button></div></article>)}</div>}<footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Uso de imagens conforme licença e atribuição cadastradas.</span></footer></section> : <><div className="page-heading"><div><p className="eyebrow muted">DISTRIBUIÇÃO EDITORIAL</p><h1>Notificações <span className="heading-spark">✳</span></h1><p className="page-intro">Escolha uma pauta publicada e leve-a até os leitores.</p></div><div className="published-count"><span className="count-icon"><Icon name="spark" /></span><div><strong>{totalTopics}</strong><span>pautas disponíveis</span></div></div></div>
           <div className="section-heading"><div><h2>Pautas publicadas</h2><p>Conteúdos revisados e prontos para compartilhar.</p></div><form className="search-form" onSubmit={handleSearch}><Icon name="search" /><input aria-label="Buscar pautas" placeholder="Buscar pautas…" value={query} onChange={(event) => setQuery(event.target.value)} /><button type="submit">Buscar</button></form></div>
           {topicsError && <div className="error-banner" role="alert"><span>{topicsError}</span><button className="text-button" onClick={() => session && void fetchTopics(page, activeQuery, session)}>Tentar novamente</button></div>}
           {loadingTopics ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Buscando pautas publicadas…</span></div> : topics.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="search" size={25} /></span><h3>{activeQuery ? "Nenhuma pauta encontrada" : "Ainda não há pautas por aqui"}</h3><p>{activeQuery ? "Tente ajustar sua busca ou limpar o campo." : "Pautas elegíveis aparecerão aqui quando forem publicadas."}</p>{activeQuery && <button className="button button-secondary" onClick={() => { setQuery(""); setActiveQuery(""); setPage(1); }}>Limpar busca</button>}</div> : <div className="topic-list">{topics.map((topic) => <article className="topic-card" key={topic.id}><div className="topic-date"><span className="date-mark" /><span>{formatDate(topic.publishedAt)}</span></div><h3>{topic.title}</h3><p className="topic-summary">{topic.summary || "Sem resumo disponível."}</p><div className="topic-footer"><span className="article-count"><span className="article-dot" />{topic.articleCount} {topic.articleCount === 1 ? "artigo" : "artigos"}</span><button className="button button-select" onClick={() => chooseTopic(topic)}>Selecionar <Icon name="arrow" size={16} /></button></div></article>)}</div>}
           {!loadingTopics && topics.length > 0 && <div className="pagination"><span>Página {page} de {totalPages}</span><div><button aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>←</button><button aria-label="Próxima página" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>→</button></div></div>}
-          <footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Seleção editorial, distribuição responsável.</span></footer>
+          <footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Seleção editorial, distribuição responsável.</span></footer></>}
         </div>
       </section>
       {selectedTopic && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !dispatchBusy) closeReview(); }}><section className="review-modal" role="dialog" aria-modal="true" aria-labelledby="review-title"><header className="modal-header"><div><p className="eyebrow muted">REVISÃO DE ENVIO</p><h2 id="review-title">Tudo pronto para compartilhar?</h2></div><button className="icon-button close-button" aria-label="Fechar" onClick={closeReview} disabled={dispatchBusy}><Icon name="close" /></button></header>
