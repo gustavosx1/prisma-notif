@@ -22,6 +22,18 @@ const IMAGE_CATEGORIES: { id: ImageEntityType; label: string }[] = [
   { id: "institution", label: "Instituições" },
   { id: "topic", label: "Temas" },
 ];
+const MOTIVATIONAL_QUOTES = [
+  "Cada grande conquista começa com a decisão de tentar.",
+  "Seu trabalho de hoje constrói as oportunidades de amanhã.",
+  "Consistência transforma pequenos passos em grandes resultados.",
+  "Confie no processo: progresso também é vitória.",
+  "Você é capaz de mais do que imagina.",
+  "Grandes ideias ganham força quando colocadas em prática.",
+  "Aprender no caminho também faz parte da chegada.",
+  "Um passo de cada vez ainda é avanço.",
+  "Seu esforço de hoje é o orgulho de amanhã.",
+  "Continue: a próxima tentativa pode mudar tudo.",
+];
 const TITLE_SUGGESTIONS = [
   "Saiba mais!",
   "Veja todas as perspectivas",
@@ -107,13 +119,14 @@ function Icon({ name, size = 18 }: { name: "spark" | "search" | "arrow" | "bell"
   };
   return <svg {...common}>{paths[name]}</svg>;
 }
-function Brand() { return <div className="brand"><span className="brand-mark"><Image src={prismaLogo} alt="" priority className="brand-logo-image" /></span><span>prisma<span className="brand-light">news</span><small>NOTIFICATION STUDIO</small></span></div>; }
+function Brand() { return <div className="brand"><Image src={prismaLogo} alt="" width={40} height={40} priority className="brand-logo-image" /><span>prisma<span className="brand-light">news</span><small>NOTIFICATION STUDIO</small></span></div>; }
 
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [adminAccess, setAdminAccess] = useState<AdminAccess>("checking");
   const [adminCheckAttempt, setAdminCheckAttempt] = useState(0);
+  const [quoteIndex, setQuoteIndex] = useState(0);
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [authError, setAuthError] = useState(""); const [authBusy, setAuthBusy] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]); const [page, setPage] = useState(1); const [totalPages, setTotalPages] = useState(1); const [totalTopics, setTotalTopics] = useState(0);
   const [activeSection, setActiveSection] = useState<"notifications" | "images">("notifications");
@@ -124,6 +137,13 @@ export default function Home() {
   const [selected, setSelected] = useState<Topic | null>(null); const [editedTitle, setEditedTitle] = useState(""); const [editedBody, setEditedBody] = useState("");
   const [dispatchRequest, setDispatchRequest] = useState<DispatchRequest | null>(null); const [dispatchBusy, setDispatchBusy] = useState(false); const [dispatchStatus, setDispatchStatus] = useState<DispatchStatus | null>(null); const [dispatchError, setDispatchError] = useState(""); const [checkingStatus, setCheckingStatus] = useState(false);
   const currentSession = useRef<Session | null>(null); const statusAbort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setQuoteIndex((index) => (index + 1) % MOTIVATIONAL_QUOTES.length);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -274,7 +294,7 @@ export default function Home() {
 
   return (
     <main className="dashboard-shell">
-      <aside className="sidebar"><Brand /><div className="sidebar-label">WORKSPACE</div><button className={`workspace-nav ${activeSection === "notifications" ? "nav-active" : ""}`} onClick={() => setActiveSection("notifications")}><span className="nav-icon"><Icon name="bell" /></span>Notificações</button><button className={`workspace-nav ${activeSection === "images" ? "nav-active" : ""}`} onClick={() => setActiveSection("images")}><span className="nav-icon">▧</span>Imagens</button><div className="sidebar-bottom"><div className="sidebar-tip"><span className="tip-star">✳</span><p>Uma seleção cuidadosa faz toda a diferença.</p></div><div className="profile"><div className="avatar">{session.user.email?.trim().toLowerCase() === "gustavosantos.kng@gmail.com" ? <Image src={gustaPhoto} alt="Foto de Gustavo" width={32} height={32} className="profile-photo" /> : (session.user.email?.[0] ?? "P").toUpperCase()}</div><div className="profile-data"><strong>{session.user.email}</strong><span>Administrador</span></div><button className="icon-button logout-button" title="Sair" aria-label="Sair" onClick={handleLogout}><Icon name="logout" /></button></div></div></aside>
+      <aside className="sidebar"><Brand /><div className="sidebar-label">WORKSPACE</div><button className={`workspace-nav ${activeSection === "notifications" ? "nav-active" : ""}`} onClick={() => setActiveSection("notifications")}><span className="nav-icon"><Icon name="bell" /></span>Notificações</button><button className={`workspace-nav ${activeSection === "images" ? "nav-active" : ""}`} onClick={() => setActiveSection("images")}><span className="nav-icon">▧</span>Imagens</button><div className="sidebar-bottom"><div className="sidebar-tip" aria-label="Mensagem motivacional"><span className="tip-kicker"><i /> UMA IDEIA PARA HOJE</span><span className="tip-quote-mark" aria-hidden="true">“</span><p key={quoteIndex} className="tip-quote">{MOTIVATIONAL_QUOTES[quoteIndex]}</p><div className="tip-progress" aria-label={`Frase ${quoteIndex + 1} de ${MOTIVATIONAL_QUOTES.length}`}>{MOTIVATIONAL_QUOTES.map((quote, index) => <span key={quote} className={index === quoteIndex ? "tip-progress-active" : ""} />)}</div></div><div className="profile"><div className="avatar">{session.user.email?.trim().toLowerCase() === "gustavosantos.kng@gmail.com" ? <Image src={gustaPhoto} alt="Foto de Gustavo" width={32} height={32} className="profile-photo" /> : (session.user.email?.[0] ?? "P").toUpperCase()}</div><div className="profile-data"><strong>{session.user.email}</strong><span>Administrador</span></div><button className="icon-button logout-button" title="Sair" aria-label="Sair" onClick={handleLogout}><Icon name="logout" /></button></div></div></aside>
       <section className="main-content" id="topics"><header className="topbar"><div className="breadcrumb">Prisma News <span>/</span> <strong>{activeSection === "images" ? "Imagens" : "Notificações"}</strong></div><div className="mobile-sections"><button className={activeSection === "notifications" ? "mobile-section-active" : ""} onClick={() => setActiveSection("notifications")}>Notificações</button><button className={activeSection === "images" ? "mobile-section-active" : ""} onClick={() => setActiveSection("images")}>Imagens</button></div><button className="mobile-logout" onClick={handleLogout}><Icon name="logout" /> Sair</button><div className="topbar-tag"><span className="live-dot" /> AMBIENTE SEGURO</div></header>
         <div className="page-content">{activeSection === "images" ? <section className="images-page"><div className="page-heading"><div><p className="eyebrow muted">BIBLIOTECA EDITORIAL</p><h1>Imagens</h1><p className="page-intro">Catálogo curado de imagens com origem e direitos revisados.</p></div><div className="published-count"><span className="count-icon">▧</span><div><strong>{imageAssets.length}</strong><span>nesta categoria</span></div></div></div><div className="image-category-tabs" role="tablist" aria-label="Categorias de imagens">{IMAGE_CATEGORIES.map((category) => <button key={category.id} type="button" role="tab" aria-selected={imageCategory === category.id} className={imageCategory === category.id ? "image-category-active" : ""} onClick={() => setImageCategory(category.id)}>{category.label}</button>)}</div>{imagesError && <div className="error-banner" role="alert"><span>{imagesError}</span><button className="text-button" onClick={() => setImageRefresh((value) => value + 1)}>Tentar novamente</button></div>}{loadingImages ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Carregando catálogo…</span></div> : imagesError ? null : imageAssets.length === 0 ? <div className="empty-state"><span className="empty-icon">▧</span><h3>Nenhuma imagem nesta categoria</h3><p>Imagens ativas do catálogo aparecerão aqui.</p></div> : <div className="image-grid">{imageAssets.map((asset) => <article className="image-asset-card" key={asset.id}><div className="image-preview"><Image src={asset.imageUrl} alt={asset.displayName} fill unoptimized sizes="(max-width: 700px) 100vw, (max-width: 1100px) 50vw, 33vw" referrerPolicy="no-referrer" /></div><div className="image-asset-info"><h2>{asset.displayName}</h2><p>{asset.attribution || asset.licenseName}</p><button className="button button-secondary copy-image-button" onClick={() => void copyImageUrl(asset)}>{copiedImageId === asset.id ? "Link copiado" : "Copiar link da imagem"}</button></div></article>)}</div>}<footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Uso de imagens conforme licença e atribuição cadastradas.</span></footer></section> : <><div className="page-heading"><div><p className="eyebrow muted">DISTRIBUIÇÃO EDITORIAL</p><h1>Notificações <span className="heading-spark">✳</span></h1><p className="page-intro">Escolha uma pauta publicada e leve-a até os leitores.</p></div><div className="published-count"><span className="count-icon"><Icon name="spark" /></span><div><strong>{totalTopics}</strong><span>pautas disponíveis</span></div></div></div>
           <div className="section-heading"><div><h2>Pautas publicadas</h2><p>Conteúdos revisados e prontos para compartilhar.</p></div><form className="search-form" onSubmit={handleSearch}><Icon name="search" /><input aria-label="Buscar pautas" placeholder="Buscar pautas…" value={query} onChange={(event) => setQuery(event.target.value)} /><button type="submit">Buscar</button></form></div>

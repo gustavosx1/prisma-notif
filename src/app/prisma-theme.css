@@ -10,4 +10,16 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible{
 @media(prefers-reduced-motion:reduce){.image-asset-card{animation:none}.image-asset-card,.image-preview img{transition:none}}
 .image-preview{position:relative}
 .brand-logo-image{width:28px;height:28px;object-fit:contain}
+.brand-logo-image{width:40px;height:40px;flex:none;object-fit:contain}
 .profile-photo{display:block;width:100%;height:100%;border-radius:50%;object-fit:cover}
+.sidebar .brand{gap:9px;padding-right:0;padding-left:0}
+.sidebar-tip{position:relative;margin:0 2px 22px;padding:2px 4px 16px;border:0;border-radius:0;background:transparent}
+.tip-kicker{display:flex;align-items:center;gap:8px;color:#8b8498;font-size:9px;font-weight:700;letter-spacing:1.2px}
+.tip-kicker i{width:7px;height:7px;border-radius:50%;background:#7c3aed;box-shadow:0 0 0 4px #ede9fe}
+.tip-quote-mark{display:block;height:39px;margin:17px 0 -7px;color:#c4b5fd;font-family:Georgia,serif;font-size:58px;font-weight:700;line-height:1}
+.sidebar-tip p.tip-quote{min-height:58px;margin:0;color:#312e3b;font-size:14px;font-weight:650;letter-spacing:-.15px;line-height:1.5;animation:quote-arrive .35s ease both}
+.tip-progress{display:flex;gap:5px;margin-top:17px}
+.tip-progress span{width:7px;height:3px;border-radius:99px;background:#e5e7eb;transition:width .25s,background .25s}
+.tip-progress span.tip-progress-active{width:21px;background:#7c3aed}
+@keyframes quote-arrive{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.sidebar-tip p.tip-quote{animation:none}.tip-progress span{transition:none}}
