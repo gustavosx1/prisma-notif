@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Image from "next/image";
+import prismaLogo from "../../assets/logo.png";
 import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -105,7 +106,7 @@ function Icon({ name, size = 18 }: { name: "spark" | "search" | "arrow" | "bell"
   };
   return <svg {...common}>{paths[name]}</svg>;
 }
-function Brand() { return <div className="brand"><span className="brand-mark"><Icon name="spark" size={21} /></span><span>prisma<span className="brand-light">news</span><small>NOTIFICATION STUDIO</small></span></div>; }
+function Brand() { return <div className="brand"><span className="brand-mark"><Image src={prismaLogo} alt="" priority className="brand-logo-image" /></span><span>prisma<span className="brand-light">news</span><small>NOTIFICATION STUDIO</small></span></div>; }
 
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);

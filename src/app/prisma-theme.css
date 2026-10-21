@@ -9,3 +9,4 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible{
 @media(max-width:420px){.image-grid{grid-template-columns:1fr}.image-preview{aspect-ratio:16/9}.mobile-sections button{padding:7px 8px;font-size:11px}.mobile-logout{padding:6px 8px}}
 @media(prefers-reduced-motion:reduce){.image-asset-card{animation:none}.image-asset-card,.image-preview img{transition:none}}
 .image-preview{position:relative}
+.brand-logo-image{width:28px;height:28px;object-fit:contain}
