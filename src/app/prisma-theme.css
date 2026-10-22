@@ -136,3 +136,26 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible{
 	.published-count{padding:8px}
 	.published-count>div span:not(.count-icon){max-width:74px}
 }
+.image-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  margin: 24px 0 18px;
+  padding: 0 14px;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  color: var(--muted, #7b8290);
+}
+.image-search:focus-within { border-color: var(--accent, #7266e8); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #7266e8) 14%, transparent); }
+.image-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text, #202433); font: inherit; }
+.image-search input::placeholder { color: var(--muted, #9298a5); }
+.image-search-count { flex: none; font-size: 12px; white-space: nowrap; }
+.image-search-clear { flex: none; border: 0; background: transparent; color: var(--accent, #6458d8); font: inherit; font-size: 13px; cursor: pointer; }
+@media (max-width: 600px) {
+  .image-search { gap: 8px; margin: 18px 0 14px; padding: 0 11px; }
+  .image-search-count { font-size: 11px; }
+  .image-search input { font-size: 14px; }
+}
