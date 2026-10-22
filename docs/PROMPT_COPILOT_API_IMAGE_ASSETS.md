@@ -13,12 +13,18 @@ Você está no repositório da API Spectrum do Prisma News. Implemente o endpoin
 3. Confirme o contrato esperado pelo cliente neste prompt e no painel. Não exponha a service-role key nem dados privados ao browser.
 4. Não aplique migrations destrutivas, não altere políticas RLS e não faça deploy/restart na VPS. Se faltar tabela/índice/permissão, documente a lacuna e proponha migration versionada separada.
 
-## Endpoint a implementar
+## Endpoint exato chamado pelo frontend
 
-`GET /notifications/admin/images?entity_type=public_figure&page=1&page_size=24`
+`GET /notifications/admin/images?entity_type=public_figure`
 
-- `entity_type` é obrigatório e aceita exclusivamente `public_figure`, `institution` ou `topic`; valor inválido deve retornar `422`.
-- `page` é inteiro >= 1. `page_size` é inteiro entre 1 e 100, default 24. Validar e limitar parâmetros conforme convenções atuais.
+O painel envia **somente** o parâmetro `entity_type`, trocando seu valor conforme a aba selecionada:
+
+- `public_figure`
+- `institution`
+- `topic`
+
+Não exigir `page`, `page_size`, busca, nem parâmetros adicionais: o frontend atual não os envia. `entity_type` é obrigatório e aceita exclusivamente os três valores acima; valor ausente ou inválido deve retornar `422` conforme o padrão do framework.
+
 - Exigir `Authorization: Bearer <Supabase access token>` e aplicar exatamente o mesmo guard compartilhado dos demais endpoints administrativos. O servidor deve validar token e `public.user_profiles.is_admin IS TRUE` para o UUID extraído da identidade validada. Falha de autenticação: `401`; usuário autenticado não-admin: `403`; falha técnica no serviço de autorização: falhar fechado sem consultar ou devolver assets.
 - A autorização não pode depender de CORS, da UI nem de dados enviados no body/query. Não criar endpoint público e não aceitar credencial de banco do cliente.
 
@@ -33,7 +39,7 @@ Você está no repositório da API Spectrum do Prisma News. Implemente o endpoin
 - Busca de texto não é necessária nesta primeira versão; não implementar filtros SQL arbitrários.
 - Retornar só campos de leitura necessários para exibir a imagem, identificar entidade e mostrar a licença/atribuição. Não devolver aliases, dados de perfil, tokens, dados de outros registros, nem campos internos desnecessários.
 
-## Contrato JSON esperado pelo painel
+## Contrato JSON exato esperado pelo painel
 
 HTTP `200`:
 
@@ -46,22 +52,16 @@ HTTP `200`:
       "display_name": "Polícia Federal",
       "image_url": "https://cdn.example/pf.jpg",
       "license_name": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0/",
-      "source_url": "https://source.example/page",
       "attribution": "Fotógrafa / fonte"
     }
-  ],
-  "pagination": {
-    "page": 1,
-    "page_size": 24,
-    "total": 1,
-    "total_pages": 1
-  }
+  ]
 }
 ```
 
-- `license_url`, `source_url` e `attribution` podem ser `null` quando ausentes na tabela. `id` pode ser serializado como inteiro JSON; não converter para UUID. Preservar `image_url` exatamente como salvo.
-- Página sem resultados deve retornar `200`, `assets: []` e paginação coerente (com `total_pages` pelo menos 1, se essa for a convenção do projeto).
+- O parser atual lê uma lista JSON direta ou uma lista dentro de `assets`, `images`, `items`, `results` ou `data` (inclusive envelopes aninhados) e aceita os campos em snake_case/camelCase. O formato recomendado e estável continua sendo `{"assets": [...]}` com `id`, `entity_key`, `display_name`, `image_url`, `license_name` e `attribution`.
+- `id` pode ser inteiro JSON; não converter para UUID. `attribution` pode ser `null`. Preservar `image_url` exatamente como salvo.
+- O frontend não usa nem envia paginação atualmente. Retorne os assets ativos e válidos para aquele tipo em `assets`; se for necessário limitar o volume por segurança/escala, ajuste também o contrato e o frontend em conjunto, sem introduzir paginação silenciosa que esconda registros.
+- Categoria sem resultados deve retornar `200` e `{"assets": []}`.
 - Não retornar HTML, URLs assinadas com credenciais, URLs privadas, metadados de usuários, nem transformar a consulta em proxy de imagem. Não afirmar que os direitos foram verificados além do que está registrado; os metadados são responsabilidade editorial.
 
 ## CORS e operação
@@ -78,8 +78,8 @@ Adicione testes usando a infraestrutura existente, sem depender do Supabase de p
 2. Usuário autenticado não-admin, perfil inexistente ou `is_admin=false/NULL`: `403`; a consulta não ocorre.
 3. Erro/timeout na autorização: fail-closed; a consulta não ocorre.
 4. Admin permitido: `200`, esquema esperado e apenas os campos declarados.
-5. Tipos aceitos funcionam; tipo inválido, página/tamanho inválido são rejeitados (`422` conforme framework).
-6. SQL/repositório filtra tipo, `is_active`, `valid_from` e `valid_until`, pagina e ordena deterministicamente. Cobrir limites/empty page.
+5. Cada tipo aceito retorna os assets correspondentes; tipo ausente/inválido retorna `422` conforme framework.
+6. Consulta/repositório filtra tipo, `is_active`, `valid_from` e `valid_until` e ordena deterministicamente. Cobrir categoria vazia e confirmar que não há paginação silenciosa.
 7. Origin Vercel permitida funciona no preflight; origem arbitrária não recebe `Access-Control-Allow-Origin`. Confirmar parser e formato efetivo de `API_CORS_ORIGINS`.
 8. Resposta e logs não contêm credenciais nem dados de perfil.
 

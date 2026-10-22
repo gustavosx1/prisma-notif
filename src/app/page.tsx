@@ -60,17 +60,28 @@ function readTopicPage(payload: Record<string, unknown>, requestedPage: number) 
   const pageSize = Number(meta.page_size ?? meta.per_page ?? payload.page_size ?? PAGE_SIZE);
   return { topics, page: Number(meta.page ?? payload.page ?? requestedPage), totalPages: Number(meta.total_pages ?? meta.pages ?? payload.total_pages ?? Math.max(1, Math.ceil(total / pageSize))), total };
 }
-function readImageAssets(payload: Record<string, unknown>): ImageAsset[] {
-  const rows = [payload.assets, payload.images, payload.items, payload.data].find(Array.isArray) as unknown[] | undefined;
-  return (rows ?? []).map((raw) => {
+function readImageAssets(payload: unknown): ImageAsset[] {
+  function findRows(value: unknown, depth = 0): unknown[] {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== "object" || depth >= 3) return [];
+    const object = value as Record<string, unknown>;
+    for (const key of ["assets", "images", "items", "results", "data"]) {
+      const candidate = object[key];
+      if (Array.isArray(candidate)) return candidate;
+      const nested = findRows(candidate, depth + 1);
+      if (nested.length) return nested;
+    }
+    return [];
+  }
+  return findRows(payload).map((raw) => {
     const row = raw as Record<string, unknown>;
     return {
-      id: String(row.id ?? row.entity_key ?? row.image_url ?? ""),
-      displayName: String(row.display_name ?? row.entity_key ?? "Imagem sem nome"),
-      imageUrl: String(row.image_url ?? ""),
-      entityKey: String(row.entity_key ?? ""),
+      id: String(row.id ?? row.entity_key ?? row.image_url ?? row.imageUrl ?? ""),
+      displayName: String(row.display_name ?? row.displayName ?? row.entity_key ?? row.name ?? "Imagem sem nome"),
+      imageUrl: String(row.image_url ?? row.imageUrl ?? ""),
+      entityKey: String(row.entity_key ?? row.entityKey ?? ""),
       attribution: row.attribution ? String(row.attribution) : null,
-      licenseName: String(row.license_name ?? "Licença não informada"),
+      licenseName: String(row.license_name ?? row.licenseName ?? "Licença não informada"),
     };
   }).filter((asset) => asset.imageUrl);
 }
