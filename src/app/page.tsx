@@ -7,7 +7,8 @@ import gustaPhoto from "../../assets/foto-gusta.png";
 import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
-type Topic = { id: string; title: string; summary: string; publishedAt: string | null; articleCount: number };
+type SpectrumCounts = { left: number; center: number; right: number };
+type Topic = { id: string; title: string; summary: string; publishedAt: string | null; articleCount: number; spectrumCounts: SpectrumCounts | null };
 type ImageEntityType = "public_figure" | "institution" | "topic";
 type ImageAsset = { id: string; displayName: string; imageUrl: string; entityKey: string; attribution: string | null; licenseName: string };
 type DispatchStatus = { id: string; state: string; accepted: number | null; rejected: number | null; receipts: string | null; error: string | null };
@@ -23,6 +24,35 @@ const IMAGE_CATEGORIES: { id: ImageEntityType; label: string }[] = [
   { id: "institution", label: "Instituições" },
   { id: "topic", label: "Temas" },
 ];
+const SPECTRUM_SEGMENTS = [
+  { key: "left", label: "Esquerda", color: "#6256d9" },
+  { key: "center", label: "Centro", color: "#8b95a5" },
+  { key: "right", label: "Direita", color: "#18a184" },
+] as const;
+function readNonNegativeCount(value: unknown): number {
+  const count = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : 0;
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+function readSpectrumCounts(spectrum: unknown, blindspot: unknown): SpectrumCounts | null {
+  if (spectrum && typeof spectrum === "object" && !Array.isArray(spectrum)) {
+    const counts = spectrum as Record<string, unknown>;
+    const keys = ["left", "center_left", "center", "center_right", "right"];
+    if (keys.some((key) => key in counts)) {
+      return {
+        left: readNonNegativeCount(counts.left) + readNonNegativeCount(counts.center_left),
+        center: readNonNegativeCount(counts.center),
+        right: readNonNegativeCount(counts.center_right) + readNonNegativeCount(counts.right),
+      };
+    }
+  }
+  if (blindspot && typeof blindspot === "object" && !Array.isArray(blindspot)) {
+    const counts = blindspot as Record<string, unknown>;
+    if (["left", "center", "right"].some((key) => key in counts)) {
+      return { left: readNonNegativeCount(counts.left), center: readNonNegativeCount(counts.center), right: readNonNegativeCount(counts.right) };
+    }
+  }
+  return null;
+}
 function TopicSummary({ summary }: { summary: string }) {
   const [expanded, setExpanded] = useState(false);
   const characters = Array.from(summary);
@@ -33,6 +63,99 @@ function TopicSummary({ summary }: { summary: string }) {
     <p className="topic-summary">{expanded || !hasMore ? summary : preview}</p>
     {hasMore && <button type="button" className="topic-summary-more" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? "Ler menos" : "Ler mais..."}</button>}
   </>;
+}
+function SpectrumRuler({ title, counts }: { title: string; counts: SpectrumCounts }) {
+  const [exportState, setExportState] = useState<"idle" | "saved" | "error">("idle");
+  const total = counts.left + counts.center + counts.right;
+  if (!total) return null;
+
+  async function exportPng() {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1200;
+      canvas.height = 280;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas indisponível");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#202a28";
+      context.font = "600 32px Arial, sans-serif";
+      context.fillText("Régua de espectro", 64, 62);
+      context.fillStyle = "#58645e";
+      context.font = "24px Arial, sans-serif";
+      const maxTitleWidth = canvas.width - 128;
+      let titleLine = "";
+      let titleY = 104;
+      for (const word of title.split(/\s+/)) {
+        const candidate = titleLine ? `${titleLine} ${word}` : word;
+        if (titleLine && context.measureText(candidate).width > maxTitleWidth) {
+          context.fillText(titleLine, 64, titleY);
+          titleY += 30;
+          titleLine = word;
+          if (titleY > 134) break;
+        } else {
+          titleLine = candidate;
+        }
+      }
+      if (titleLine && titleY <= 134) context.fillText(titleLine, 64, titleY);
+
+      const barX = 64;
+      const barY = 150;
+      const barWidth = canvas.width - 128;
+      const barHeight = 28;
+      context.save();
+      context.beginPath();
+      context.roundRect(barX, barY, barWidth, barHeight, barHeight / 2);
+      context.clip();
+      let currentX = barX;
+      for (const segment of SPECTRUM_SEGMENTS) {
+        const width = (counts[segment.key] / total) * barWidth;
+        if (width > 0) {
+          context.fillStyle = segment.color;
+          context.fillRect(currentX, barY, width, barHeight);
+        }
+        currentX += width;
+      }
+      context.restore();
+
+      const colWidth = barWidth / SPECTRUM_SEGMENTS.length;
+      context.font = "600 21px Arial, sans-serif";
+      SPECTRUM_SEGMENTS.forEach((segment, index) => {
+        const x = barX + index * colWidth;
+        context.fillStyle = segment.color;
+        context.beginPath();
+        context.arc(x + 8, 220, 7, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = "#202a28";
+        context.fillText(`${segment.label}: ${counts[segment.key]}`, x + 25, 227);
+      });
+
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("Não foi possível gerar a imagem");
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const safeTitle = title.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "topico";
+      link.href = url;
+      link.download = `regua-espectro-${safeTitle}.png`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportState("saved");
+      window.setTimeout(() => setExportState("idle"), 1800);
+    } catch {
+      setExportState("error");
+      window.setTimeout(() => setExportState("idle"), 2500);
+    }
+  }
+
+  return <section className="spectrum-ruler" aria-label={`Espectro da cobertura: ${total} artigos`}>
+    <div className="spectrum-track" role="img" aria-label={SPECTRUM_SEGMENTS.map((segment) => `${segment.label}: ${counts[segment.key]}`).join(", ")}>
+      {SPECTRUM_SEGMENTS.map((segment) => counts[segment.key] > 0 && <span key={segment.key} className="spectrum-track-segment" style={{ flexGrow: counts[segment.key], backgroundColor: segment.color }} />)}
+    </div>
+    <div className="spectrum-labels">{SPECTRUM_SEGMENTS.map((segment) => <span key={segment.key} className="spectrum-label"><i style={{ backgroundColor: segment.color }} />{segment.label} · {counts[segment.key]}</span>)}</div>
+    <button type="button" className="spectrum-export" onClick={() => void exportPng()} aria-label={`Exportar régua de espectro de ${title} como PNG`}>
+      {exportState === "saved" ? "PNG salvo" : exportState === "error" ? "Falha ao exportar" : "↓ Exportar PNG"}
+    </button>
+  </section>;
 }
 const MOTIVATIONAL_QUOTES = [
   "Cada grande conquista começa com a decisão de tentar.",
@@ -66,7 +189,7 @@ function readTopicPage(payload: Record<string, unknown>, requestedPage: number) 
   const rows = [payload.topics, payload.items, payload.results, payload.data].find(Array.isArray) as unknown[] | undefined;
   const topics: Topic[] = (rows ?? []).map((raw) => {
     const row = raw as Record<string, unknown>;
-    return { id: String(row.id ?? row.topic_id ?? ""), title: String(row.canonical_title ?? row.title ?? "Sem título"), summary: String(row.summary ?? row.short_summary ?? row.description ?? ""), publishedAt: (row.created_at ?? row.createdAt ?? row.published_at ?? row.publishedAt ?? row.date ?? null) as string | null, articleCount: Number(row.article_count ?? row.articles_count ?? row.articleCount ?? 0) };
+    return { id: String(row.id ?? row.topic_id ?? ""), title: String(row.canonical_title ?? row.title ?? "Sem título"), summary: String(row.summary ?? row.short_summary ?? row.description ?? ""), publishedAt: (row.created_at ?? row.createdAt ?? row.published_at ?? row.publishedAt ?? row.date ?? null) as string | null, articleCount: Number(row.article_count ?? row.articles_count ?? row.articleCount ?? 0), spectrumCounts: readSpectrumCounts(row.spectrum_counts ?? row.spectrumCounts, row.blindspot) };
   }).filter((topic) => topic.id);
   const total = Number(meta.total ?? meta.total_items ?? payload.total ?? topics.length);
   const pageSize = Number(meta.page_size ?? meta.per_page ?? payload.page_size ?? PAGE_SIZE);
@@ -350,7 +473,7 @@ export default function Home() {
         </section> : <><div className="page-heading"><div><p className="eyebrow muted">DISTRIBUIÇÃO EDITORIAL</p><h1>Notificações <span className="heading-spark">✳</span></h1><p className="page-intro">Escolha uma pauta publicada e leve-a até os leitores.</p></div><div className="published-count"><span className="count-icon"><Icon name="spark" /></span><div><strong>{totalTopics}</strong><span>pautas disponíveis</span></div></div></div>
           <div className="section-heading"><div><h2>Pautas publicadas</h2><p>Conteúdos revisados e prontos para compartilhar.</p></div><form className="search-form" onSubmit={handleSearch}><Icon name="search" /><input aria-label="Buscar pautas" placeholder="Buscar pautas…" value={query} onChange={(event) => setQuery(event.target.value)} /><button type="submit">Buscar</button></form></div>
           {topicsError && <div className="error-banner" role="alert"><span>{topicsError}</span><button className="text-button" onClick={() => session && void fetchTopics(page, activeQuery, session)}>Tentar novamente</button></div>}
-          {loadingTopics ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Buscando pautas publicadas…</span></div> : topics.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="search" size={25} /></span><h3>{activeQuery ? "Nenhuma pauta encontrada" : "Ainda não há pautas por aqui"}</h3><p>{activeQuery ? "Tente ajustar sua busca ou limpe o campo." : "Pautas elegíveis aparecerão aqui quando forem publicadas."}</p>{activeQuery && <button className="button button-secondary" onClick={() => { setQuery(""); setActiveQuery(""); setPage(1); }}>Limpar busca</button>}</div> : <div className="topic-list">{topics.map((topic) => <article className="topic-card" key={topic.id}><div className="topic-date"><span className="date-mark" /><span>{formatDate(topic.publishedAt)}</span></div><h3>{topic.title}</h3><TopicSummary summary={topic.summary || "Sem resumo disponível."} /><div className="topic-card-actions"><div className="topic-copy-actions"><button type="button" className="topic-copy-button" onClick={() => void copyTopicField(topic, "title")} aria-label={copiedTopicField === `${topic.id}:title` ? "Título copiado" : `Copiar título: ${topic.title}`} title="Copiar título"><Icon name={copiedTopicField === `${topic.id}:title` ? "check" : "copy"} size={14} /><span>título</span></button><button type="button" className="topic-copy-button" onClick={() => void copyTopicField(topic, "summary")} disabled={!topic.summary} aria-label={copiedTopicField === `${topic.id}:summary` ? "Sumário copiado" : `Copiar sumário: ${topic.title}`} title="Copiar sumário"><Icon name={copiedTopicField === `${topic.id}:summary` ? "check" : "copy"} size={14} /><span>sumário</span></button></div>{copyTopicError?.startsWith(`${topic.id}:`) && <span className="topic-copy-error" role="status">Falha ao copiar</span>}<div className="topic-footer"><span className="article-count"><span className="article-dot" />{topic.articleCount} {topic.articleCount === 1 ? "artigo" : "artigos"}</span><button className="button button-select" onClick={() => chooseTopic(topic)}>Selecionar <Icon name="arrow" size={16} /></button></div></div></article>)}</div>}
+          {loadingTopics ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Buscando pautas publicadas…</span></div> : topics.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="search" size={25} /></span><h3>{activeQuery ? "Nenhuma pauta encontrada" : "Ainda não há pautas por aqui"}</h3><p>{activeQuery ? "Tente ajustar sua busca ou limpe o campo." : "Pautas elegíveis aparecerão aqui quando forem publicadas."}</p>{activeQuery && <button className="button button-secondary" onClick={() => { setQuery(""); setActiveQuery(""); setPage(1); }}>Limpar busca</button>}</div> : <div className="topic-list">{topics.map((topic) => <article className="topic-card" key={topic.id}><div className="topic-date"><span className="date-mark" /><span>{formatDate(topic.publishedAt)}</span></div><h3>{topic.title}</h3><TopicSummary summary={topic.summary || "Sem resumo disponível."} />{topic.spectrumCounts && <SpectrumRuler title={topic.title} counts={topic.spectrumCounts} />}<div className="topic-card-actions"><div className="topic-copy-actions"><button type="button" className="topic-copy-button" onClick={() => void copyTopicField(topic, "title")} aria-label={copiedTopicField === `${topic.id}:title` ? "Título copiado" : `Copiar título: ${topic.title}`} title="Copiar título"><Icon name={copiedTopicField === `${topic.id}:title` ? "check" : "copy"} size={14} /><span>título</span></button><button type="button" className="topic-copy-button" onClick={() => void copyTopicField(topic, "summary")} disabled={!topic.summary} aria-label={copiedTopicField === `${topic.id}:summary` ? "Sumário copiado" : `Copiar sumário: ${topic.title}`} title="Copiar sumário"><Icon name={copiedTopicField === `${topic.id}:summary` ? "check" : "copy"} size={14} /><span>sumário</span></button></div>{copyTopicError?.startsWith(`${topic.id}:`) && <span className="topic-copy-error" role="status">Falha ao copiar</span>}<div className="topic-footer"><span className="article-count"><span className="article-dot" />{topic.articleCount} {topic.articleCount === 1 ? "artigo" : "artigos"}</span><button className="button button-select" onClick={() => chooseTopic(topic)}>Selecionar <Icon name="arrow" size={16} /></button></div></div></article>)}</div>}
           {!loadingTopics && topics.length > 0 && <div className="pagination"><span>Página {page} de {totalPages}</span><div><button aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>←</button><button aria-label="Próxima página" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>→</button></div></div>}
           <footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Seleção editorial, distribuição responsável.</span></footer></>}
         </div>

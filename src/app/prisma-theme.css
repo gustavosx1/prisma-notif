@@ -24,10 +24,18 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible{
 .topic-card h3{order:1;margin:0;font-size:18px;line-height:1.4}
 .topic-card .topic-date{order:2;display:flex;align-items:center;gap:7px;margin-top:6px;font-size:11px;line-height:1.4}
 .topic-card .topic-summary{order:3;margin:14px 0 0;font-size:13px;line-height:1.55}
-.topic-card .topic-card-actions{order:4;margin-top:16px;padding-top:0}
+.topic-card .spectrum-ruler{order:4;margin-top:14px;padding:12px;border:1px solid #ececf3;border-radius:14px;background:#fafaff}
+.spectrum-track{display:flex;height:12px;overflow:hidden;border-radius:999px;background:#e5e7eb}
+.spectrum-track-segment{display:block;min-width:0;flex-basis:0}
+.spectrum-labels{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+.spectrum-label{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border-radius:999px;background:#fff;color:#59616d;font-size:10px;font-weight:600}
+.spectrum-label i{width:7px;height:7px;border-radius:50%}
+.spectrum-export{margin-top:10px;padding:0;border:0;background:transparent;color:#5b21b6;font-size:11px;font-weight:650}
+.spectrum-export:hover{text-decoration:underline}
+.topic-card .topic-card-actions{order:5;margin-top:16px;padding-top:0}
 .topic-card .topic-copy-actions{margin-bottom:11px}
 .topic-card .topic-footer{margin-top:0;padding-top:12px;border-top:1px solid #f0f1f3}
-@media(max-width:700px){.topic-card{min-height:0;padding:17px}.topic-card .topic-summary{margin-top:11px}.topic-card .topic-card-actions{margin-top:13px}}
+@media(max-width:700px){.topic-card{min-height:0;padding:17px}.topic-card .topic-summary{margin-top:11px}.topic-card .spectrum-ruler{margin-top:11px;padding:10px}.spectrum-labels{gap:5px}.spectrum-label{font-size:9px}.topic-card .topic-card-actions{margin-top:13px}}
 .sidebar .brand{gap:9px;padding-right:0;padding-left:0}
 .sidebar-tip{position:relative;margin:0 2px 22px;padding:2px 4px 16px;border:0;border-radius:0;background:transparent}
 .tip-kicker{display:flex;align-items:center;gap:8px;color:#8b8498;font-size:9px;font-weight:700;letter-spacing:1.2px}

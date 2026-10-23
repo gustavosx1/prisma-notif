@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "export:topic-summaries": "node scripts/export-topic-summaries.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
