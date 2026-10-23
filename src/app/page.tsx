@@ -25,9 +25,9 @@ const IMAGE_CATEGORIES: { id: ImageEntityType; label: string }[] = [
   { id: "topic", label: "Temas" },
 ];
 const SPECTRUM_SEGMENTS = [
-  { key: "left", label: "Esquerda", color: "#6256d9" },
+  { key: "left", label: "Esquerda", color: "#dc2626" },
   { key: "center", label: "Centro", color: "#8b95a5" },
-  { key: "right", label: "Direita", color: "#18a184" },
+  { key: "right", label: "Direita", color: "#2563eb" },
 ] as const;
 function readNonNegativeCount(value: unknown): number {
   const count = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : 0;
