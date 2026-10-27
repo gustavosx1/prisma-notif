@@ -11,11 +11,13 @@ type SpectrumCounts = { left: number; center: number; right: number };
 type Topic = { id: string; title: string; summary: string; publishedAt: string | null; articleCount: number; spectrumCounts: SpectrumCounts | null };
 type ImageEntityType = "public_figure" | "institution" | "topic";
 type ImageAsset = { id: string; displayName: string; imageUrl: string; entityKey: string; attribution: string | null; licenseName: string };
+type ImageCacheEntry = { assets: ImageAsset[]; cachedAt: number };
 type DispatchStatus = { id: string; state: string; accepted: number | null; rejected: number | null; receipts: string | null; error: string | null };
 type DispatchRequest = { topicId: string; title: string; body: string; idempotencyKey: string };
 type AdminAccess = "checking" | "allowed" | "denied" | "error";
 const PAGE_SIZE = 25;
 const SUMMARY_PREVIEW_LIMIT = 100;
+const IMAGE_CACHE_TTL_MS = 2 * 60 * 1000;
 const TITLE_LIMIT = Number(process.env.NEXT_PUBLIC_NOTIFICATION_TITLE_LIMIT ?? 120);
 const BODY_LIMIT = Number(process.env.NEXT_PUBLIC_NOTIFICATION_BODY_LIMIT ?? 240);
 const TERMINAL_STATES = new Set(["sent", "failed"]);
@@ -286,6 +288,7 @@ export default function Home() {
   const [selected, setSelected] = useState<Topic | null>(null); const [editedTitle, setEditedTitle] = useState(""); const [editedBody, setEditedBody] = useState("");
   const [dispatchRequest, setDispatchRequest] = useState<DispatchRequest | null>(null); const [dispatchBusy, setDispatchBusy] = useState(false); const [dispatchStatus, setDispatchStatus] = useState<DispatchStatus | null>(null); const [dispatchError, setDispatchError] = useState(""); const [checkingStatus, setCheckingStatus] = useState(false);
   const currentSession = useRef<Session | null>(null); const statusAbort = useRef<AbortController | null>(null);
+  const imageCache = useRef(new Map<string, ImageCacheEntry>()); const lastImageRefresh = useRef(imageRefresh);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -309,7 +312,7 @@ export default function Home() {
         const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
           if (!active) return;
           setSession(nextSession); currentSession.current = nextSession; setAdminAccess("checking");
-          if (!nextSession) { setTopics([]); setSelected(null); setDispatchStatus(null); setDispatchRequest(null); }
+          if (!nextSession) { setTopics([]); setSelected(null); setDispatchStatus(null); setDispatchRequest(null); imageCache.current.clear(); setImageAssets([]); }
         });
         unsubscribe = () => listener.subscription.unsubscribe();
       } catch (error) {
@@ -358,13 +361,27 @@ export default function Home() {
   useEffect(() => {
     if (!session || adminAccess !== "allowed" || activeSection !== "images") return;
     let active = true;
+    const cacheKey = `${session.user.id}:${imageCategory}`;
+    const cached = imageCache.current.get(cacheKey);
+    const forceRefresh = imageRefresh !== lastImageRefresh.current;
+    lastImageRefresh.current = imageRefresh;
+    setImageAssets(cached?.assets ?? []);
+    if (cached && !forceRefresh && Date.now() - cached.cachedAt < IMAGE_CACHE_TTL_MS) {
+      setImagesError("");
+      setLoadingImages(false);
+      return () => { active = false; };
+    }
     const loadImages = async () => {
-      setLoadingImages(true); setImagesError(""); setImageAssets([]);
+      setLoadingImages(true); setImagesError("");
       try {
         const params = new URLSearchParams({ entity_type: imageCategory });
         const response = await apiFetch(`/notifications/admin/images?${params}`, session);
         const payload = await response.json() as Record<string, unknown>;
-        if (active) setImageAssets(readImageAssets(payload));
+        if (active) {
+          const assets = readImageAssets(payload);
+          imageCache.current.set(cacheKey, { assets, cachedAt: Date.now() });
+          setImageAssets(assets);
+        }
       } catch (error) {
         if (active) setImagesError(error instanceof Error ? error.message : "Não foi possível carregar as imagens.");
       } finally {
@@ -466,7 +483,7 @@ export default function Home() {
       <section className="main-content" id="topics"><header className="topbar"><div className="breadcrumb">Prisma News <span>/</span> <strong>{activeSection === "images" ? "Imagens" : "Notificações"}</strong></div><div className="mobile-sections"><button className={activeSection === "notifications" ? "mobile-section-active" : ""} onClick={() => setActiveSection("notifications")}>Notificações</button><button className={activeSection === "images" ? "mobile-section-active" : ""} onClick={() => setActiveSection("images")}>Imagens</button></div><button className="mobile-logout" onClick={handleLogout}><Icon name="logout" /> Sair</button><div className="topbar-tag"><span className="live-dot" /> AMBIENTE SEGURO</div></header>
         <div className="page-content">{activeSection === "images" ? <section className="images-page"><div className="page-heading"><div><p className="eyebrow muted">BIBLIOTECA EDITORIAL</p><h1>Imagens</h1><p className="page-intro">Catálogo curado de imagens com origem e direitos revisados.</p></div><div className="published-count"><span className="count-icon">▧</span><div><strong>{filteredImageAssets.length}</strong><span>{imageSearch.trim() ? "resultados" : "nesta categoria"}</span></div></div></div>
 <label className="image-search" htmlFor="image-catalog-search"><Icon name="search" /><input id="image-catalog-search" type="search" placeholder="Buscar por nome, entidade ou licença…" value={imageSearch} onChange={(event) => setImageSearch(event.target.value)} /><span className="image-search-count">{filteredImageAssets.length} de {imageAssets.length}</span>{imageSearch && <button type="button" className="image-search-clear" onClick={() => setImageSearch("")} aria-label="Limpar busca">Limpar</button>}</label>
-<div className="image-category-tabs" role="tablist" aria-label="Categorias de imagens">{IMAGE_CATEGORIES.map((category) => <button key={category.id} type="button" role="tab" aria-selected={imageCategory === category.id} className={imageCategory === category.id ? "image-category-active" : ""} onClick={() => setImageCategory(category.id)}>{category.label}</button>)}</div>{imagesError && <div className="error-banner" role="alert"><span>{imagesError}</span><button className="text-button" onClick={() => setImageRefresh((value) => value + 1)}>Tentar novamente</button></div>}{loadingImages ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Carregando catálogo…</span></div> : imagesError ? null : imageAssets.length === 0 ? <div className="empty-state"><span className="empty-icon">▧</span><h3>Nenhuma imagem nesta categoria</h3><p>Imagens ativas do catálogo aparecerão aqui.</p></div> : filteredImageAssets.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="search" size={25} /></span><h3>Nenhuma imagem encontrada</h3><p>Tente outro termo ou limpe a busca para ver todas as imagens.</p><button type="button" className="button button-secondary" onClick={() => setImageSearch("")}>Limpar busca</button></div> : <div className="image-grid">{filteredImageAssets.map((asset) => (
+<div className="image-category-tabs" role="tablist" aria-label="Categorias de imagens">{IMAGE_CATEGORIES.map((category) => <button key={category.id} type="button" role="tab" aria-selected={imageCategory === category.id} className={imageCategory === category.id ? "image-category-active" : ""} onClick={() => setImageCategory(category.id)}>{category.label}</button>)}</div>{imagesError && <div className="error-banner" role="alert"><span>{imagesError}</span><button className="text-button" onClick={() => setImageRefresh((value) => value + 1)}>Tentar novamente</button></div>}{loadingImages && imageAssets.length === 0 ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Carregando catálogo…</span></div> : imagesError && imageAssets.length === 0 ? null : imageAssets.length === 0 ? <div className="empty-state"><span className="empty-icon">▧</span><h3>Nenhuma imagem nesta categoria</h3><p>Imagens ativas do catálogo aparecerão aqui.</p></div> : filteredImageAssets.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="search" size={25} /></span><h3>Nenhuma imagem encontrada</h3><p>Tente outro termo ou limpe a busca para ver todas as imagens.</p><button type="button" className="button button-secondary" onClick={() => setImageSearch("")}>Limpar busca</button></div> : <div className="image-grid">{filteredImageAssets.map((asset) => (
 <article className="image-asset-card" key={asset.id}><div className="image-preview"><Image src={asset.imageUrl} alt={asset.displayName} fill unoptimized sizes="(max-width: 700px) 100vw, (max-width: 1100px) 50vw, 33vw" referrerPolicy="no-referrer" /></div><div className="image-asset-info"><h2>{asset.displayName}</h2><p>{asset.attribution || asset.licenseName}</p><button className="button button-secondary copy-image-button" onClick={() => void copyImageUrl(asset)}>{copiedImageId === asset.id ? "Link copiado" : "Copiar link da imagem"}</button></div></article>))}
           </div>}
           <footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Uso de imagens conforme licença e atribuição cadastradas.</span></footer>
