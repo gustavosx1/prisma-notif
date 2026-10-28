@@ -9,6 +9,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 type SpectrumCounts = { left: number; center: number; right: number };
 type Topic = { id: string; title: string; summary: string; publishedAt: string | null; articleCount: number; spectrumCounts: SpectrumCounts | null };
+type TopicCacheEntry = { topics: Topic[]; page: number; totalPages: number; total: number; cachedAt: number };
 type ImageEntityType = "public_figure" | "institution" | "topic";
 type ImageAsset = { id: string; displayName: string; imageUrl: string; entityKey: string; attribution: string | null; licenseName: string };
 type ImageCacheEntry = { assets: ImageAsset[]; cachedAt: number };
@@ -18,6 +19,9 @@ type AdminAccess = "checking" | "allowed" | "denied" | "error";
 const PAGE_SIZE = 25;
 const SUMMARY_PREVIEW_LIMIT = 100;
 const IMAGE_CACHE_TTL_MS = 2 * 60 * 1000;
+const TOPIC_CACHE_TTL_MS = 2 * 60 * 1000;
+const TOPIC_CACHE_STORAGE_PREFIX = "prisma-notif:topics:v1:";
+const SUMMARY_COPY_FOOTER = "♦️Via Prisma News - Baixe agora no link da bio\n\n#política #noticias #jornalismo #economia #startup";
 const TITLE_LIMIT = Number(process.env.NEXT_PUBLIC_NOTIFICATION_TITLE_LIMIT ?? 120);
 const BODY_LIMIT = Number(process.env.NEXT_PUBLIC_NOTIFICATION_BODY_LIMIT ?? 240);
 const TERMINAL_STATES = new Set(["sent", "failed"]);
@@ -197,6 +201,44 @@ function readTopicPage(payload: Record<string, unknown>, requestedPage: number) 
   const pageSize = Number(meta.page_size ?? meta.per_page ?? payload.page_size ?? PAGE_SIZE);
   return { topics, page: Number(meta.page ?? payload.page ?? requestedPage), totalPages: Number(meta.total_pages ?? meta.pages ?? payload.total_pages ?? Math.max(1, Math.ceil(total / pageSize))), total };
 }
+function topicCacheKey(userId: string, page: number, search: string) {
+  return `${TOPIC_CACHE_STORAGE_PREFIX}${encodeURIComponent(userId)}:${page}:${encodeURIComponent(search)}`;
+}
+function readTopicCache(userId: string, page: number, search: string): TopicCacheEntry | null {
+  if (typeof window === "undefined") return null;
+  const key = topicCacheKey(userId, page, search);
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as TopicCacheEntry;
+    if (!Array.isArray(entry.topics) || !Number.isFinite(entry.cachedAt) || Date.now() - entry.cachedAt >= TOPIC_CACHE_TTL_MS) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+    return entry;
+  } catch {
+    try { window.sessionStorage.removeItem(key); } catch { /* storage indisponível */ }
+    return null;
+  }
+}
+function writeTopicCache(userId: string, page: number, search: string, result: Omit<TopicCacheEntry, "cachedAt">) {
+  if (typeof window === "undefined") return;
+  const key = topicCacheKey(userId, page, search);
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify({ ...result, cachedAt: Date.now() } satisfies TopicCacheEntry));
+  } catch {
+    // O cache é opcional; a tela continua usando os dados em memória.
+  }
+}
+function clearTopicCache(userId?: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const keys = Array.from({ length: window.sessionStorage.length }, (_, index) => window.sessionStorage.key(index)).filter((key): key is string => key !== null && key.startsWith(TOPIC_CACHE_STORAGE_PREFIX) && (!userId || key.startsWith(`${TOPIC_CACHE_STORAGE_PREFIX}${encodeURIComponent(userId)}:`)));
+    keys.forEach((key) => window.sessionStorage.removeItem(key));
+  } catch {
+    // O cache é opcional; falhas de storage não devem afetar o logout.
+  }
+}
 function readImageAssets(payload: unknown): ImageAsset[] {
   function findRows(value: unknown, depth = 0): unknown[] {
     if (Array.isArray(value)) return value;
@@ -312,7 +354,7 @@ export default function Home() {
         const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
           if (!active) return;
           setSession(nextSession); currentSession.current = nextSession; setAdminAccess("checking");
-          if (!nextSession) { setTopics([]); setSelected(null); setDispatchStatus(null); setDispatchRequest(null); imageCache.current.clear(); setImageAssets([]); }
+          if (!nextSession) { clearTopicCache(); setTopics([]); setSelected(null); setDispatchStatus(null); setDispatchRequest(null); imageCache.current.clear(); setImageAssets([]); }
         });
         unsubscribe = () => listener.subscription.unsubscribe();
       } catch (error) {
@@ -342,13 +384,22 @@ export default function Home() {
     return () => { active = false; clearTimeout(timer); };
   }, [session, adminCheckAttempt]);
 
-  const fetchTopics = useCallback(async (targetPage: number, search: string, activeSession: Session) => {
-    setLoadingTopics(true); setTopicsError("");
+  const fetchTopics = useCallback(async (targetPage: number, search: string, activeSession: Session, forceRefresh = false) => {
+    const cached = readTopicCache(activeSession.user.id, targetPage, search);
+    if (cached) {
+      setTopics(cached.topics); setPage(cached.page); setTotalPages(cached.totalPages); setTotalTopics(cached.total);
+      setLoadingTopics(false); setTopicsError("");
+      if (!forceRefresh) return;
+    } else {
+      setTopics([]); setTotalPages(1); setTotalTopics(0); setLoadingTopics(true);
+    }
+    setTopicsError("");
     try {
       const params = new URLSearchParams({ page: String(targetPage), page_size: String(PAGE_SIZE), search });
       const response = await apiFetch(`/notifications/admin/topics?${params}`, activeSession);
       const result = readTopicPage(await response.json() as Record<string, unknown>, targetPage);
       setTopics(result.topics); setPage(result.page); setTotalPages(result.totalPages); setTotalTopics(result.total);
+      writeTopicCache(activeSession.user.id, targetPage, search, result);
     } catch (error) { setTopicsError(error instanceof Error ? error.message : "Não foi possível carregar os tópicos."); }
     finally { setLoadingTopics(false); }
   }, []);
@@ -448,7 +499,7 @@ export default function Home() {
     }
   }
   async function copyTopicField(topic: Topic, field: "title" | "summary") {
-    const value = field === "title" ? topic.title : topic.summary;
+    const value = field === "title" ? topic.title : `${topic.summary}\n\n${SUMMARY_COPY_FOOTER}`;
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
@@ -489,7 +540,7 @@ export default function Home() {
           <footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Uso de imagens conforme licença e atribuição cadastradas.</span></footer>
         </section> : <><div className="page-heading"><div><p className="eyebrow muted">DISTRIBUIÇÃO EDITORIAL</p><h1>Notificações <span className="heading-spark">✳</span></h1><p className="page-intro">Escolha uma pauta publicada e leve-a até os leitores.</p></div><div className="published-count"><span className="count-icon"><Icon name="spark" /></span><div><strong>{totalTopics}</strong><span>pautas disponíveis</span></div></div></div>
           <div className="section-heading"><div><h2>Pautas publicadas</h2><p>Conteúdos revisados e prontos para compartilhar.</p></div><form className="search-form" onSubmit={handleSearch}><Icon name="search" /><input aria-label="Buscar pautas" placeholder="Buscar pautas…" value={query} onChange={(event) => setQuery(event.target.value)} /><button type="submit">Buscar</button></form></div>
-          {topicsError && <div className="error-banner" role="alert"><span>{topicsError}</span><button className="text-button" onClick={() => session && void fetchTopics(page, activeQuery, session)}>Tentar novamente</button></div>}
+          {topicsError && <div className="error-banner" role="alert"><span>{topicsError}</span><button className="text-button" onClick={() => session && void fetchTopics(page, activeQuery, session, true)}>Tentar novamente</button></div>}
           {loadingTopics ? <div className="topic-loading" aria-live="polite"><span className="loader" /><span>Buscando pautas publicadas…</span></div> : topics.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="search" size={25} /></span><h3>{activeQuery ? "Nenhuma pauta encontrada" : "Ainda não há pautas por aqui"}</h3><p>{activeQuery ? "Tente ajustar sua busca ou limpe o campo." : "Pautas elegíveis aparecerão aqui quando forem publicadas."}</p>{activeQuery && <button className="button button-secondary" onClick={() => { setQuery(""); setActiveQuery(""); setPage(1); }}>Limpar busca</button>}</div> : <div className="topic-list">{topics.map((topic) => <article className="topic-card" key={topic.id}><div className="topic-date"><span className="date-mark" /><span>{formatDate(topic.publishedAt)}</span></div><h3>{topic.title}</h3><TopicSummary summary={topic.summary || "Sem resumo disponível."} />{topic.spectrumCounts && <SpectrumRuler title={topic.title} counts={topic.spectrumCounts} />}<div className="topic-card-actions"><div className="topic-copy-actions"><button type="button" className="topic-copy-button" onClick={() => void copyTopicField(topic, "title")} aria-label={copiedTopicField === `${topic.id}:title` ? "Título copiado" : `Copiar título: ${topic.title}`} title="Copiar título"><Icon name={copiedTopicField === `${topic.id}:title` ? "check" : "copy"} size={14} /><span>título</span></button><button type="button" className="topic-copy-button" onClick={() => void copyTopicField(topic, "summary")} disabled={!topic.summary} aria-label={copiedTopicField === `${topic.id}:summary` ? "Sumário copiado" : `Copiar sumário: ${topic.title}`} title="Copiar sumário"><Icon name={copiedTopicField === `${topic.id}:summary` ? "check" : "copy"} size={14} /><span>sumário</span></button></div>{copyTopicError?.startsWith(`${topic.id}:`) && <span className="topic-copy-error" role="status">Falha ao copiar</span>}<div className="topic-footer"><span className="article-count"><span className="article-dot" />{topic.articleCount} {topic.articleCount === 1 ? "artigo" : "artigos"}</span><button className="button button-select" onClick={() => chooseTopic(topic)}>Selecionar <Icon name="arrow" size={16} /></button></div></div></article>)}</div>}
           {!loadingTopics && topics.length > 0 && <div className="pagination"><span>Página {page} de {totalPages}</span><div><button aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>←</button><button aria-label="Próxima página" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>→</button></div></div>}
           <footer className="page-footer"><span>Prisma News <span>•</span> Painel interno</span><span>Seleção editorial, distribuição responsável.</span></footer></>}
@@ -501,7 +552,7 @@ export default function Home() {
           <div className="audience-note"><span className="audience-icon"><Icon name="bell" size={17} /></span><div><strong>Audiência: todos os dispositivos ativos</strong><p>O envio alcança todos os tokens de dispositivo ativos registrados no app. Não há segmentação por pessoa ou status Premium.</p></div></div><div className="image-note"><span>✳</span><p>A imagem é escolhida automaticamente: a IA sugere até três sujeitos centrais e o sistema usa a primeira correspondência ativa do catálogo.</p></div>
           {dispatchError && <div className="inline-error dispatch-error" role="alert"><span>{dispatchError}</span>{dispatchRequest && <button className="text-button" disabled={dispatchBusy} onClick={() => void submitDispatch(dispatchRequest)}>Repetir a mesma solicitação</button>}</div>}
           <div className="modal-actions"><button className="button button-secondary" onClick={closeReview} disabled={dispatchBusy}>Cancelar</button><button className="button button-primary" onClick={beginDispatch} disabled={dispatchBusy || Boolean(dispatchRequest) || !editedTitle.trim() || !editedBody.trim() || editedBody.length > BODY_LIMIT}>{dispatchBusy ? <><span className="small-spinner" /> Solicitando…</> : <>Confirmar envio <Icon name="arrow" /></>}</button></div>
-        </> : <div className="dispatch-result"><div className={`status-illustration status-${dispatchStatus.state}`}><Icon name={TERMINAL_STATES.has(dispatchStatus.state) ? dispatchStatus.state === "sent" ? "check" : "close" : "refresh"} size={25} /></div><p className="eyebrow muted">ACOMPANHAMENTO DO ENVIO</p><h3>{dispatchStatus.state === "queued" ? "Na fila para envio" : dispatchStatus.state === "sending" ? "Envio em andamento" : dispatchStatus.state === "sent" ? "Envio concluído" : dispatchStatus.state === "failed" ? "Não foi possível concluir" : `Estado: ${dispatchStatus.state}`}</h3><p className="result-topic">{selectedTopic.title}</p><div className="status-track"><span className={dispatchStatus.state !== "failed" ? "step-done" : "step-failed"}><i />Solicitação recebida</span><span className={["sending", "sent"].includes(dispatchStatus.state) ? "step-done" : dispatchStatus.state === "failed" ? "step-failed" : ""}><i />Processamento</span><span className={dispatchStatus.state === "sent" ? "step-done" : dispatchStatus.state === "failed" ? "step-failed" : ""}><i />Envio ao Expo</span></div><div className="count-grid"><div><strong>{dispatchStatus.accepted ?? "—"}</strong><span>Aceitos pelo Expo</span></div><div><strong>{dispatchStatus.rejected ?? "—"}</strong><span>Rejeitados</span></div><div><strong>{dispatchStatus.receipts ?? (checkingStatus ? "Consultando" : "Pendente")}</strong><span>Estado dos receipts</span></div></div>{dispatchStatus.error && <p className="inline-error" role="alert">{dispatchStatus.error}</p>}<p className="delivery-disclaimer">Aceitação pelo Expo não confirma que a notificação foi exibida no aparelho.</p>{dispatchError && <div className="inline-error" role="alert">{dispatchError}</div>}{!TERMINAL_STATES.has(dispatchStatus.state) && <p className="polling-note"><span className="small-spinner" /> Atualização automática a cada 3 segundos</p>}<div className="modal-actions result-actions"><button className="button button-secondary" onClick={() => { if (session) void fetchTopics(page, activeQuery, session); }}>Atualizar pautas</button><button className="button button-primary" onClick={closeReview}>Concluir</button></div></div>}</section></div>}
+        </> : <div className="dispatch-result"><div className={`status-illustration status-${dispatchStatus.state}`}><Icon name={TERMINAL_STATES.has(dispatchStatus.state) ? dispatchStatus.state === "sent" ? "check" : "close" : "refresh"} size={25} /></div><p className="eyebrow muted">ACOMPANHAMENTO DO ENVIO</p><h3>{dispatchStatus.state === "queued" ? "Na fila para envio" : dispatchStatus.state === "sending" ? "Envio em andamento" : dispatchStatus.state === "sent" ? "Envio concluído" : dispatchStatus.state === "failed" ? "Não foi possível concluir" : `Estado: ${dispatchStatus.state}`}</h3><p className="result-topic">{selectedTopic.title}</p><div className="status-track"><span className={dispatchStatus.state !== "failed" ? "step-done" : "step-failed"}><i />Solicitação recebida</span><span className={["sending", "sent"].includes(dispatchStatus.state) ? "step-done" : dispatchStatus.state === "failed" ? "step-failed" : ""}><i />Processamento</span><span className={dispatchStatus.state === "sent" ? "step-done" : dispatchStatus.state === "failed" ? "step-failed" : ""}><i />Envio ao Expo</span></div><div className="count-grid"><div><strong>{dispatchStatus.accepted ?? "—"}</strong><span>Aceitos pelo Expo</span></div><div><strong>{dispatchStatus.rejected ?? "—"}</strong><span>Rejeitados</span></div><div><strong>{dispatchStatus.receipts ?? (checkingStatus ? "Consultando" : "Pendente")}</strong><span>Estado dos receipts</span></div></div>{dispatchStatus.error && <p className="inline-error" role="alert">{dispatchStatus.error}</p>}<p className="delivery-disclaimer">Aceitação pelo Expo não confirma que a notificação foi exibida no aparelho.</p>{dispatchError && <div className="inline-error" role="alert">{dispatchError}</div>}{!TERMINAL_STATES.has(dispatchStatus.state) && <p className="polling-note"><span className="small-spinner" /> Atualização automática a cada 3 segundos</p>}<div className="modal-actions result-actions"><button className="button button-secondary" onClick={() => { if (session) void fetchTopics(page, activeQuery, session, true); }}>Atualizar pautas</button><button className="button button-primary" onClick={closeReview}>Concluir</button></div></div>}</section></div>}
     </main>
   );
 }
