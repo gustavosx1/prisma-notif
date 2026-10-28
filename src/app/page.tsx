@@ -353,8 +353,13 @@ export default function Home() {
         setAuthReady(true);
         const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
           if (!active) return;
-          setSession(nextSession); currentSession.current = nextSession; setAdminAccess("checking");
-          if (!nextSession) { clearTopicCache(); setTopics([]); setSelected(null); setDispatchStatus(null); setDispatchRequest(null); imageCache.current.clear(); setImageAssets([]); }
+          const previousUserId = currentSession.current?.user.id;
+          const nextUserId = nextSession?.user.id;
+          setSession(nextSession); currentSession.current = nextSession;
+          if (previousUserId !== nextUserId) {
+            setAdminAccess("checking");
+            if (!nextSession) { clearTopicCache(); setTopics([]); setSelected(null); setDispatchStatus(null); setDispatchRequest(null); imageCache.current.clear(); setImageAssets([]); }
+          }
         });
         unsubscribe = () => listener.subscription.unsubscribe();
       } catch (error) {
@@ -368,8 +373,9 @@ export default function Home() {
     return () => { active = false; unsubscribe(); };
   }, []);
 
+  const adminCheckUserId = session?.user.id;
   useEffect(() => {
-    if (!session) return;
+    if (!adminCheckUserId) return;
     let active = true;
     const checkAdmin = async () => {
       try {
@@ -382,7 +388,7 @@ export default function Home() {
     };
     const timer = setTimeout(() => { void checkAdmin(); }, 0);
     return () => { active = false; clearTimeout(timer); };
-  }, [session, adminCheckAttempt]);
+  }, [adminCheckUserId, adminCheckAttempt]);
 
   const fetchTopics = useCallback(async (targetPage: number, search: string, activeSession: Session, forceRefresh = false) => {
     const cached = readTopicCache(activeSession.user.id, targetPage, search);
