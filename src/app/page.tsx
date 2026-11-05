@@ -176,16 +176,16 @@ const MOTIVATIONAL_QUOTES = [
   "Continue: a próxima tentativa pode mudar tudo.",
 ];
 const TITLE_SUGGESTIONS = [
-  "🔎 Saiba mais",
-  "Veja todas as perspectivas",
-  "📰 Entenda o que está acontecendo",
-  "Confira os principais detalhes",
-  "📌 Veja o que muda agora",
-  "Acompanhe essa história",
-  "💡 O que você precisa saber",
-  "Leia a análise completa",
-  "🧭 Descubra os próximos passos",
-  "Veja os pontos essenciais",
+  "📰 Veja onde divergem",
+  "📊 Compare os espectros",
+  "🔎 Descubra os contrastes",
+  "🗞️ O que divide opiniões",
+  "🎙️ Ouça os dois lados",
+  "📊 Quem vê diferente?",
+  "📰 Entenda o contraste",
+  "🔎 Explore os espectros",
+  "🗞️ Visões em perspectiva",
+  "📑 O debate, em foco",
 ];
 
 function apiBaseUrl() { return (process.env.NEXT_PUBLIC_SPECTRUM_API_URL ?? "").replace(/\/$/, ""); }
