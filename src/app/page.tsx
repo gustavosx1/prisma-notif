@@ -188,6 +188,9 @@ const TITLE_SUGGESTIONS = [
   "🗞️ Visões em perspectiva",
   "📑 O debate, em foco",
   "📌 Veja o que muda agora",
+  "💡 O que você precisa saber",
+  "📰 Acompanhe essa história",
+  "🔎 Entenda os fatos",
 ];
 
 function apiBaseUrl() { return (process.env.NEXT_PUBLIC_SPECTRUM_API_URL ?? "").replace(/\/$/, ""); }
