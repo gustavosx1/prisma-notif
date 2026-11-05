@@ -176,6 +176,7 @@ const MOTIVATIONAL_QUOTES = [
   "Continue: a próxima tentativa pode mudar tudo.",
 ];
 const TITLE_SUGGESTIONS = [
+  "🔎 Saiba mais",
   "📰 Veja onde divergem",
   "📊 Compare os espectros",
   "🔎 Descubra os contrastes",
@@ -186,6 +187,7 @@ const TITLE_SUGGESTIONS = [
   "🔎 Explore os espectros",
   "🗞️ Visões em perspectiva",
   "📑 O debate, em foco",
+  "📌 Veja o que muda agora",
 ];
 
 function apiBaseUrl() { return (process.env.NEXT_PUBLIC_SPECTRUM_API_URL ?? "").replace(/\/$/, ""); }
